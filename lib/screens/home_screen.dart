@@ -1,0 +1,297 @@
+import 'package:flutter/material.dart';
+import 'package:trulyabled/config/app_routes.dart';
+import '../config/app_constant.dart';
+import 'package:trulyabled/widget/bottam_navigationbar_widget.dart';
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  final List<Map<String, dynamic>> quickActions = const [
+    {"title": "Scan Text", "icon": Icons.document_scanner},
+    {"title": "Voice", "icon": Icons.mic},
+    {"title": "SOS", "icon": Icons.emergency},
+    {"title": "Navigate", "icon": Icons.navigation},
+  ];
+
+  final List<Map<String, dynamic>> services = const [
+    {"title": "OCR Reader", "icon": Icons.menu_book},
+    {"title": "Object Detection", "icon": Icons.visibility},
+    {"title": "Currency", "icon": Icons.currency_rupee},
+    {"title": "Text to Speech", "icon": Icons.record_voice_over},
+    {"title": "Speech to Text", "icon": Icons.keyboard_voice},
+    {"title": "Medicine Reminder", "icon": Icons.medication},
+    {"title": "Emergency Call", "icon": Icons.call},
+    {"title": "Shopping", "icon": Icons.shopping_cart},
+  ];
+
+  /// Centralized Navigation Router Method
+  void _handleNavigation(BuildContext context, String title) {
+    switch (title) {
+      // Quick Actions Mapping
+      case "Scan Text":
+      case "OCR Reader":
+        Navigator.pushNamed(context, '/ocrreader');
+        break;
+      case "Voice":
+      case "Speech to Text":
+        Navigator.pushNamed(context, '/stt');
+        break;
+      case "SOS":
+      case "Emergency Call":
+        Navigator.pushNamed(context, '/sos');
+        break;
+      case "Navigate":
+        Navigator.pushNamed(context, '/navigation_map');
+        break;
+
+      // Rest of the Services Mapping
+      case "Object Detection":
+        Navigator.pushNamed(context, '/camera');
+        break;
+      case "Currency":
+        Navigator.pushNamed(context, '/currencyercognitiont');
+        break;
+      case "Text to Speech":
+        Navigator.pushNamed(context, '/tts');
+        break;
+      case "Medicine Reminder":
+        Navigator.pushNamed(context, '/reminder');
+        break;
+      case "Shopping":
+        Navigator.pushNamed(context, '/shopping');
+        break;
+      default:
+        // Optional Fallback
+        debugPrint("No route registered for: $title");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xffF6F8FC),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: Text(
+          AppConstant.appName,
+          style: const TextStyle(
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        actions: const [
+          Icon(Icons.notifications_none, color: Colors.black),
+          SizedBox(width: 15),
+          CircleAvatar(
+            backgroundColor: Color(0xff004AC6),
+            child: Icon(Icons.person, color: Colors.white),
+          ),
+          SizedBox(width: 15),
+        ],
+      ),
+      bottomNavigationBar: const BottamNavigationbarWidget(selectedIndex: 0),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            /// Greeting Card
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xff004AC6),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Row(
+                children: [
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor: Colors.white,
+                    child: Icon(
+                      Icons.person,
+                      color: Color(0xff004AC6),
+                      size: 35,
+                    ),
+                  ),
+                  SizedBox(width: 15),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Good Morning 👋",
+                          style: TextStyle(color: Colors.white70, fontSize: 15),
+                        ),
+                        SizedBox(height: 5),
+                        Text(
+                          "Welcome Back",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 22,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 20),
+            const SearchBar(
+              hintText: "Search accessibility features...",
+              leading: Icon(Icons.search),
+            ),
+            const SizedBox(height: 25),
+
+            const Text(
+              "Quick Actions",
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 15),
+
+            /// GridView for Quick Actions
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: quickActions.length,
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 15,
+                crossAxisSpacing: 15,
+                childAspectRatio: 1.2,
+              ),
+              itemBuilder: (context, index) {
+                final item = quickActions[index];
+
+                return Card(
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(18),
+                    onTap: () => _handleNavigation(
+                      context,
+                      item["title"],
+                    ), // Dynamic logic here
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircleAvatar(
+                          radius: 28,
+                          backgroundColor: Colors.blue.shade50,
+                          child: Icon(
+                            item["icon"],
+                            size: 30,
+                            color: const Color(0xff004AC6),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          item["title"],
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(height: 30),
+            const Text(
+              "Accessibility Services",
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 15),
+
+            /// ListView for Accessibility Services
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: services.length,
+              itemBuilder: (context, index) {
+                final item = services[index];
+
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.blue.shade50,
+                      child: Icon(item["icon"], color: const Color(0xff004AC6)),
+                    ),
+                    title: Text(item["title"]),
+                    trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                    onTap: () => _handleNavigation(
+                      context,
+                      item["title"],
+                    ), // Dynamic logic here too
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(height: 20),
+
+            /// Bottom AI Card
+            Card(
+              elevation: 3,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: Colors.blue.shade100,
+                      child: const Icon(
+                        Icons.smart_toy,
+                        color: Color(0xff004AC6),
+                        size: 30,
+                      ),
+                    ),
+                    const SizedBox(width: 15),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "AI Assistant",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 18,
+                            ),
+                          ),
+                          SizedBox(height: 5),
+                          Text("Tap the microphone to ask for help anytime."),
+                        ],
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: () => _handleNavigation(
+                        context,
+                        "Voice",
+                      ), // Routes to Speech screen
+                      icon: const Icon(Icons.mic),
+                      label: const Text("Speak"),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 25),
+          ],
+        ),
+      ),
+    );
+  }
+}
