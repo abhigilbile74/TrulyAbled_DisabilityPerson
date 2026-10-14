@@ -7,9 +7,6 @@
     <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <meta-data android:name="com.google.android.geo.API_KEY" android:value="YOUR_API_KEY"/>
-    
-
     <application
         android:label="trulyabled"
         android:name="${applicationName}"
@@ -32,10 +29,6 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
-              <meta-data 
-    android:name="com.google.android.geo.GOOGLE_MAPS_API_KEY"
-    android:value="${mapsApiKey}" />
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

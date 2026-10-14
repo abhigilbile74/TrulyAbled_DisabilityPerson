@@ -32,9 +32,8 @@ dependencies:
   google_mlkit_text_recognition: ^0.15.0
   
   # navigation 
-  google_maps_flutter: ^2.6.1
   flutter_compass: ^0.8.0
-  # http: ^1.2
+  http: ^1.5.0
 
   # Speech to text 
   speech_to_text: ^6.6.2
@@ -51,6 +50,11 @@ dependencies:
   riverpod: ^3.3.2
   flutter_riverpod: ^3.3.2
   ultralytics_yolo: ^0.6.5
+
+  flutter_bloc: ^9.1.1
+  equatable: ^2.0.5
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 
 dev_dependencies:
   flutter_test:

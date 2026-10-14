@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:trulyabled/config/app_constant.dart';
 import 'package:trulyabled/config/app_routes.dart';
-import 'package:trulyabled/screens/home_screen.dart';
 import 'package:trulyabled/screens/intialScreen/login_screen.dart';
 import 'package:trulyabled/widget/onborading_page_widget.dart';
 
