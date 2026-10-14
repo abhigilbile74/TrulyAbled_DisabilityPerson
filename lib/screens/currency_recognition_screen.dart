@@ -1,474 +1,465 @@
-// import 'package:flutter/material.dart';
-// import 'package:camera/camera.dart';
-// import 'package:flutter_tts/flutter_tts.dart';
-// import 'package:vibration/vibration.dart';
-// import 'package:image/image.dart' as img;
-// import '../services/camera_service.dart';
 
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:image_picker/image_picker.dart';
 
-class CurrencyRecognitionScreen extends StatelessWidget{
+import '../services/currency_model_service.dart';
+
+class CurrencyRecognitionScreen extends StatefulWidget {
   const CurrencyRecognitionScreen({super.key});
+
   @override
-  Widget build(BuildContext context) {
-    // TODO: implement build
-    throw UnimplementedError();
-  }
+  State<CurrencyRecognitionScreen> createState() =>
+      _CurrencyRecognitionScreenState();
 }
 
+class _CurrencyRecognitionScreenState
+    extends State<CurrencyRecognitionScreen> {
+  final ImagePicker _picker = ImagePicker();
+  final CurrencyModelService _model = CurrencyModelService();
+  final FlutterTts _tts = FlutterTts();
 
-// class CurrencyRecognitionScreen extends StatefulWidget {
-//   const CurrencyRecognitionScreen({super.key});
+  CameraController? _cameraController;
+  Uint8List? _selectedImageBytes;
 
-//   @override
-//   State<CurrencyRecognitionScreen> createState() => _CurrencyRecognitionScreenState();
-// }
+  bool _cameraReady = false;
+  bool _modelReady = false;
+  bool _busy = false;
+  bool _speaking = false;
 
-// class _CurrencyRecognitionScreenState extends State<CurrencyRecognitionScreen>
-//     with SingleTickerProviderStateMixin {
-//   final CameraService cameraService = CameraService();
-//   final FlutterTts _tts = FlutterTts();
-  
-//   late AnimationController scanController;
-//   late Animation<double> scanAnimation;
-  
-//   Interpreter? _interpreter;
-//   List<String> _labels = [];
-//   bool _modelLoaded = false;
-  
-//   String detectedValue = "₹0";
-//   String detectedNote = "No note detected";
-//   double confidence = 0.0;
-//   bool speaking = false;
-//   bool _isProcessing = false;
+  String _result = 'No currency detected';
+  String _details = 'Choose a photo or capture a banknote to begin.';
+  String? _message;
+  double _confidence = 0;
 
-//   @override
-//   void initState() {
-//     super.initState();
-//     cameraService.initialize().then((_) => setState(() {}));
-//     scanController = AnimationController(vsync: this, duration: const Duration(seconds: 3))..repeat();
-//     scanAnimation = Tween<double>(begin: 0, end: 1).animate(scanController);
-//     _initTts();
-//     _loadModel();
-//     _startDetectionLoop();
-//   }
+  @override
+  void initState() {
+    super.initState();
+    _setupTts();
+    _initializeModel();
+    _initializeCamera();
+  }
 
-//   Future<void> _initTts() async {
-//     await _tts.setLanguage("en-IN"); // Indian English
-//     await _tts.setSpeechRate(0.5);
-//     await _tts.setPitch(1.0);
-//   }
+  Future<void> _setupTts() async {
+    try {
+      await _tts.setLanguage('en-IN');
+      await _tts.setSpeechRate(0.45);
+      _tts.setCompletionHandler(() {
+        if (mounted) setState(() => _speaking = false);
+      });
+    } catch (e) {
+      debugPrint('TTS setup failed: $e');
+    }
+  }
 
-//   Future<void> _loadModel() async {
-//     try {
-//       _interpreter = await Interpreter.fromAsset('assets/models/currency_model.tflite');
-//       final labelsData = await DefaultAssetBundle.of(context).loadString('assets/models/labels.txt');
-//       _labels = labelsData.split('\n');
-//       setState(() => _modelLoaded = true);
-//     } catch (e) {
-//       print('Model load error: $e');
-//     }
-//   }
+  Future<void> _initializeModel() async {
+    try {
+      await _model.loadModel();
+      if (!mounted) return;
+      setState(() {
+        _modelReady = true;
+        _message = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _modelReady = false;
+        _message = _model.unsupportedMessage;
+      });
+    }
+  }
 
-//   void _startDetectionLoop() {
-//     Future.delayed(const Duration(milliseconds: 500), () async {
-//       if (!mounted || !_modelLoaded || !cameraService.controller.value.isInitialized) {
-//         _startDetectionLoop();
-//         return;
-//       }
-//       await _runDetection();
-//       _startDetectionLoop();
-//     });
-//   }
+  Future<void> _initializeCamera() async {
+    try {
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        if (mounted) {
+          setState(() => _message = 'No camera found. Choose an image instead.');
+        }
+        return;
+      }
 
-//   Future<void> _runDetection() async {
-//     if (_isProcessing) return;
-//     _isProcessing = true;
+      final camera = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
 
-//     try {
-//       final file = await cameraService.controller.takePicture();
-//       final bytes = await file.readAsBytes();
-//       final image = img.decodeImage(bytes);
-//       if (image == null) return;
+      final controller = CameraController(
+        camera,
+        ResolutionPreset.medium,
+        enableAudio: false,
+      );
+      await controller.initialize();
 
-//       // Preprocess: resize to 224x224, normalize
-//       final resized = img.copyResize(image, width: 224, height: 224);
-//       final input = _imageToByteListFloat32(resized, 224);
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _cameraController = controller;
+        _cameraReady = true;
+      });
+    } catch (e) {
+      debugPrint('Camera unavailable: $e');
+      if (mounted) {
+        setState(() {
+          _cameraReady = false;
+          _message = 'Camera unavailable. You can still select a photo from '
+              'your gallery or computer.';
+        });
+      }
+    }
+  }
 
-//       // Run inference
-//       final output = List.filled(1 * _labels.length, 0.0).reshape([1, _labels.length]);
-//       _interpreter!.run(input.reshape([1, 224, 224, 3]), output);
+  Future<void> _chooseGalleryImage() async {
+    try {
+      final XFile? file = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 95,
+      );
+      if (file == null) return;
 
-//       // Get highest confidence
-//       final results = output[0] as List<double>;
-//       double maxConf = 0;
-//       int maxIndex = 0;
-//       for (int i = 0; i < results.length; i++) {
-//         if (results[i] > maxConf) {
-//           maxConf = results[i];
-//           maxIndex = i;
-//         }
-//       }
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
 
-//       if (maxConf > 0.65 && mounted) {
-//         final note = _labels[maxIndex];
-//         setState(() {
-//           detectedValue = "₹$note";
-//           detectedNote = _getNoteDescription(note);
-//           confidence = maxConf;
-//         });
+      setState(() {
+        _selectedImageBytes = bytes;
+        _result = 'Image selected';
+        _details = 'Tap “Recognize Currency” to analyze this image.';
+        _confidence = 0;
+        _message = _modelReady
+            ? null
+            : 'Image selected successfully. Prediction is not available '
+                'until a compatible model or API is configured.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _message = 'Could not open the image: $e');
+    }
+  }
 
-//         // Vibrate on new detection
-//         if (await Vibration.hasVibrator() == true) {
-//           Vibration.vibrate(duration: 100);
-//         }
-//       }
-//     } catch (e) {
-//       print('Detection error: $e');
-//     } finally {
-//       _isProcessing = false;
-//     }
-//   }
+  Future<void> _capturePhoto() async {
+    final controller = _cameraController;
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        !_cameraReady) {
+      setState(() {
+        _message = 'Camera unavailable. Use “Choose from Gallery” instead.';
+      });
+      return;
+    }
 
-//   List<List<List<List<double>>>> _imageToByteListFloat32(img.Image image, int size) {
-//     var convertedBytes = List.generate(
-//       1,
-//       (index) => List.generate(
-//         size,
-//         (y) => List.generate(
-//           size,
-//           (x) {
-//             final pixel = image.getPixel(x, y);
-//             return [
-//               (pixel.r / 255.0),
-//               (pixel.g / 255.0),
-//               (pixel.b / 255.0),
-//             ];
-//           },
-//         ),
-//       ),
-//     );
-//     return convertedBytes;
-//   }
+    try {
+      final XFile photo = await controller.takePicture();
+      final bytes = await photo.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _selectedImageBytes = bytes;
+        _result = 'Image captured';
+        _details = 'Tap “Recognize Currency” to analyze this image.';
+        _confidence = 0;
+        _message = _modelReady
+            ? null
+            : 'Photo captured, but prediction needs a compatible model/API.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _message = 'Could not capture photo. Choose an image from the gallery.';
+      });
+    }
+  }
 
-//   String _getNoteDescription(String value) {
-//     switch (value) {
-//       case "10": return "Brown 10 Rupee note with Sun Temple";
-//       case "20": return "Greenish Yellow 20 Rupee note with Ellora Caves";
-//       case "50": return "Fluorescent Blue 50 Rupee note with Hampi";
-//       case "100": return "Lavender 100 Rupee note with Rani Ki Vav";
-//       case "200": return "Bright Yellow 200 Rupee note with Sanchi Stupa";
-//       case "500": return "Stone Grey 500 Rupee note with Red Fort";
-//       case "2000": return "Magenta 2000 Rupee note with Mangalyaan";
-//       default: return "Indian banknote detected";
-//     }
-//   }
+  Future<void> _recognizeSelectedImage() async {
+    final bytes = _selectedImageBytes;
+    if (bytes == null) {
+      _showMessage('Choose or capture a banknote image first.');
+      return;
+    }
+    if (!_modelReady) {
+      _showMessage(
+        'The image is ready, but recognition is not configured. Add a trained '
+        'model or connect a backend prediction API.',
+      );
+      return;
+    }
+    if (_busy) return;
 
-//   Future<void> speakResult() async {
-//     if (speaking) {
-//       await _tts.stop();
-//       setState(() => speaking = false);
-//       return;
-//     }
+    setState(() {
+      _busy = true;
+      _message = null;
+      _result = 'Analyzing...';
+    });
 
-//     setState(() => speaking = true);
-//     await _tts.speak("$detectedValue detected. $detectedNote");
-    
-//     _tts.setCompletionHandler(() {
-//       if (mounted) setState(() => speaking = false);
-//     });
-//   }
+    try {
+      final prediction = await _model.predictImage(bytes);
+      final isConfident = prediction.confidence >= 0.70;
+      final label = _formatLabel(prediction.label);
 
-//   @override
-//   void dispose() {
-//     scanController.dispose();
-//     cameraService.dispose();
-//     _interpreter?.close();
-//     _tts.stop();
-//     super.dispose();
-//   }
+      if (!mounted) return;
+      setState(() {
+        _result = isConfident ? label : 'Uncertain result';
+        _confidence = prediction.confidence;
+        _details = isConfident
+            ? 'Possible denomination: $label. Authenticity has not been verified.'
+            : 'Try a clearer photo with better lighting.';
+      });
+      if (isConfident) {
+        await _speak('$label detected. Authenticity has not been verified.');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _result = 'Recognition failed';
+        _details = 'Try another clear image.';
+        _message = 'Prediction failed. Confirm that model input processing '
+            'and labels match your trained model.';
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
-//   @override
-//   Widget build(BuildContext context) {
-//     return Scaffold(
-//       backgroundColor: const Color(0xfff8f9ff),
-//       appBar: AppBar(
-//         backgroundColor: const Color(0xfff8f9ff),
-//         elevation: 0,
-//         leading: IconButton(
-//           icon: const Icon(Icons.arrow_back, color: Color(0xff15157d)),
-//           onPressed: () => Navigator.pop(context),
-//         ),
-//         title: const Text(
-//           "Currency Recognition",
-//           style: TextStyle(color: Color(0xff15157d), fontSize: 22, fontWeight: FontWeight.w600),
-//         ),
-//         actions: [
-//           IconButton(
-//             icon: const Icon(Icons.help, color: Color(0xff15157d)),
-//             onPressed: () => _showHelpDialog(),
-//           )
-//         ],
-//       ),
-//       body: Stack(
-//         children: [
-//           SingleChildScrollView(
-//             padding: const EdgeInsets.only(bottom: 100),
-//             child: Column(
-//               children: [
-//                 cameraPreview(),
-//                 Padding(
-//                   padding: const EdgeInsets.symmetric(horizontal: 16),
-//                   child: Column(
-//                     children: [
-//                       const SizedBox(height: 20),
-//                       detectionCard(),
-//                       const SizedBox(height: 20),
-//                       chips(),
-//                       const SizedBox(height: 25),
-//                       actions(),
-//                       const SizedBox(height: 20),
-//                       insight(),
-//                     ],
-//                   ),
-//                 )
-//               ],
-//             ),
-//           ),
-//           bottomNav()
-//         ],
-//       ),
-//     );
-//   }
+  String _formatLabel(String label) {
+    final clean = label.trim().replaceAll('₹', '').replaceAll('Rs.', '').trim();
+    return RegExp(r'^\d+$').hasMatch(clean) ? '₹$clean' : label;
+  }
 
-//   Widget cameraPreview() {
-//     return SizedBox(
-//       height: 400,
-//       width: double.infinity,
-//       child: Stack(
-//         children: [
-//           cameraService.controller.value.isInitialized
-//               ? CameraPreview(cameraService.controller)
-//               : Container(color: Colors.black),
-//           Center(
-//             child: Container(
-//               width: 300,
-//               height: 200,
-//               decoration: BoxDecoration(
-//                 borderRadius: BorderRadius.circular(12),
-//                 border: Border.all(color: const Color(0xff90efef), width: 2),
-//               ),
-//               child: Stack(
-//                 children: [
-//                   AnimatedBuilder(
-//                     animation: scanAnimation,
-//                     builder: (context, child) {
-//                       return Positioned(
-//                         top: 200 * scanAnimation.value,
-//                         left: 0,
-//                         right: 0,
-//                         child: Container(
-//                           height: 2,
-//                           decoration: const BoxDecoration(
-//                             gradient: LinearGradient(
-//                               colors: [Colors.transparent, Color(0xff90efef), Colors.transparent],
-//                             ),
-//                           ),
-//                         ),
-//                       );
-//                     },
-//                   ),
-//                 ],
-//               ),
-//             ),
-//           ),
-//           Positioned(
-//             bottom: 15,
-//             left: 0,
-//             right: 0,
-//             child: Center(
-//               child: Container(
-//                 padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
-//                 decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(20)),
-//                 child: Text(
-//                   _modelLoaded ? "Hold steady to recognize banknote" : "Loading model...",
-//                   style: const TextStyle(color: Colors.white, fontSize: 12),
-//                 ),
-//               ),
-//             ),
-//           )
-//         ],
-//       ),
-//     );
-//   }
+  Future<void> _speak(String text) async {
+    try {
+      await _tts.stop();
+      if (mounted) setState(() => _speaking = true);
+      await _tts.speak(text);
+    } catch (e) {
+      if (mounted) setState(() => _speaking = false);
+    }
+  }
 
-//   Widget detectionCard() {
-//     return Container(
-//       padding: const EdgeInsets.all(20),
-//       decoration: BoxDecoration(
-//         color: const Color(0xffeff4ff),
-//         borderRadius: BorderRadius.circular(18),
-//         border: const Border(left: BorderSide(color: Color(0xff006a6a), width: 5)),
-//       ),
-//       child: Column(
-//         children: [
-//           const Text("DETECTED VALUE", style: TextStyle(color: Color(0xff006a6a), fontWeight: FontWeight.bold)),
-//           const SizedBox(height: 10),
-//           Row(
-//             mainAxisAlignment: MainAxisAlignment.center,
-//             children: [
-//               Text(
-//                 detectedValue,
-//                 style: const TextStyle(color: Color(0xff15157d), fontSize: 32, fontWeight: FontWeight.bold),
-//               ),
-//               const SizedBox(width: 8),
-//               Text(
-//                 confidence > 0.65 ? "detected" : "scanning...",
-//                 style: const TextStyle(fontSize: 22),
-//               )
-//             ],
-//           ),
-//           const SizedBox(height: 15),
-//           LinearProgressIndicator(
-//             value: confidence,
-//             color: const Color(0xff006a6a),
-//             backgroundColor: const Color(0xffd9e3f6),
-//           )
-//         ],
-//       ),
-//     );
-//   }
+  Future<void> _toggleSpeech() async {
+    if (_speaking) {
+      await _tts.stop();
+      if (mounted) setState(() => _speaking = false);
+    } else {
+      await _speak('$_result. $_details. Authenticity has not been verified.');
+    }
+  }
 
-//   Widget chips() {
-//     return Column(
-//       crossAxisAlignment: CrossAxisAlignment.start,
-//       children: [
-//         const Text("Common Indian Banknotes", style: TextStyle(color: Colors.grey)),
-//         const SizedBox(height: 10),
-//         Wrap(
-//           spacing: 10,
-//           children: [
-//             chip("₹10", detectedValue == "₹10"),
-//             chip("₹20", detectedValue == "₹20"),
-//             chip("₹50", detectedValue == "₹50"),
-//             chip("₹100", detectedValue == "₹100"),
-//             chip("₹200", detectedValue == "₹200"),
-//             chip("₹500", detectedValue == "₹500"),
-//             chip("₹2000", detectedValue == "₹2000"),
-//           ],
-//         )
-//       ],
-//     );
-//   }
+  void _showMessage(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
 
-//   Widget chip(String text, bool active) {
-//     return Chip(
-//       label: Text(
-//         text,
-//         style: TextStyle(
-//           color: active ? Colors.white : const Color(0xff006a6a),
-//           fontWeight: FontWeight.bold,
-//         ),
-//       ),
-//       backgroundColor: active ? const Color(0xff2e3192) : const Color(0xff90efef),
-//     );
-//   }
+  void _clearImage() {
+    setState(() {
+      _selectedImageBytes = null;
+      _result = 'No currency detected';
+      _details = 'Choose a photo or capture a banknote to begin.';
+      _confidence = 0;
+    });
+  }
 
-//   Widget actions() {
-//     return Column(
-//       children: [
-//         SizedBox(
-//           width: double.infinity,
-//           height: 64,
-//           child: ElevatedButton.icon(
-//             style: ElevatedButton.styleFrom(
-//               backgroundColor: speaking ? const Color(0xff006a6a) : const Color(0xff2e3192),
-//               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-//             ),
-//             icon: Icon(speaking ? Icons.stop : Icons.volume_up, color: Colors.white),
-//             label: Text(
-//               speaking ? "Stop Speaking" : "Speak Result",
-//               style: const TextStyle(color: Colors.white, fontSize: 20),
-//             ),
-//             onPressed: speakResult,
-//           ),
-//         ),
-//         const SizedBox(height: 15),
-//         SizedBox(
-//           width: double.infinity,
-//           height: 55,
-//           child: OutlinedButton.icon(
-//             icon: const Icon(Icons.history),
-//             label: const Text("Scan History"),
-//             onPressed: () {},
-//           ),
-//         )
-//       ],
-//     );
-//   }
+  @override
+  void dispose() {
+    _cameraController?.dispose();
+    _model.close();
+    _tts.stop();
+    super.dispose();
+  }
 
-//   Widget insight() {
-//     return Container(
-//       padding: const EdgeInsets.all(15),
-//       decoration: BoxDecoration(
-//         color: const Color(0xffeff4ff),
-//         borderRadius: BorderRadius.circular(12),
-//         border: const Border(left: BorderSide(color: Color(0xff006a6a), width: 5)),
-//       ),
-//       child: Text(
-//         detectedNote,
-//         style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.grey),
-//       ),
-//     );
-//   }
+  @override
+  Widget build(BuildContext context) {
+    const navy = Color(0xFF20246B);
+    const teal = Color(0xFF087F8C);
 
-//   Widget bottomNav() {
-//     return Positioned(
-//       bottom: 0,
-//       left: 0,
-//       right: 0,
-//       child: Container(
-//         height: 80,
-//         decoration: const BoxDecoration(
-//           color: Color(0xffe6eeff),
-//           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-//         ),
-//         child: Row(
-//           mainAxisAlignment: MainAxisAlignment.spaceAround,
-//           children: [
-//             navItem(Icons.camera, "Scan", true),
-//             navItem(Icons.history, "History", false),
-//             navItem(Icons.record_voice_over, "Voice", false),
-//           ],
-//         ),
-//       ),
-//     );
-//   }
-
-//   Widget navItem(IconData icon, String text, bool active) {
-//     return Column(
-//       mainAxisAlignment: MainAxisAlignment.center,
-//       children: [
-//         Icon(icon, color: active ? const Color(0xff006a6a) : Colors.grey),
-//         Text(text, style: TextStyle(color: active ? const Color(0xff006a6a) : Colors.grey))
-//       ],
-//     );
-//   }
-
-//   void _showHelpDialog() {
-//     showDialog(
-//       context: context,
-//       builder: (context) => AlertDialog(
-//         title: const Text("How to Use"),
-//         content: const Text(
-//           "1. Point camera at Indian banknote\n"
-//           "2. Hold steady inside the frame\n"
-//           "3. App detects value automatically\n"
-//           "4. Tap 'Speak Result' to hear value\n\n"
-//           "Works for: ₹10, ₹20, ₹50, ₹100, ₹200, ₹500, ₹2000",
-//         ),
-//         actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("Got it"))],
-//       ),
-//     );
-//   }
-// }
+    return Scaffold(
+      backgroundColor: const Color(0xFFF6F8FF),
+      appBar: AppBar(
+        title: const Text(
+          'Currency Recognition',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        foregroundColor: navy,
+        backgroundColor: const Color(0xFFF6F8FF),
+        elevation: 0,
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              height: 280,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: const Color(0xFF171A35),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: _selectedImageBytes != null
+                  ? Image.memory(
+                      _selectedImageBytes!,
+                      fit: BoxFit.contain,
+                      width: double.infinity,
+                    )
+                  : _cameraReady &&
+                          _cameraController != null &&
+                          _cameraController!.value.isInitialized
+                      ? CameraPreview(_cameraController!)
+                      : const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.image_search,
+                                  color: Colors.white, size: 54),
+                              SizedBox(height: 12),
+                              Text(
+                                'Choose a banknote photo',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              SizedBox(height: 6),
+                              Text(
+                                'Camera optional',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ],
+                          ),
+                        ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _chooseGalleryImage,
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Choose from Gallery'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy || !_cameraReady ? null : _capturePhoto,
+                  icon: const Icon(Icons.camera_alt_outlined),
+                  label: const Text('Take Photo'),
+                ),
+                if (_selectedImageBytes != null)
+                  TextButton.icon(
+                    onPressed: _busy ? null : _clearImage,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Remove'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: navy.withOpacity(0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, 5),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  const Text(
+                    'DETECTED DENOMINATION',
+                    style: TextStyle(
+                      color: teal,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    _result,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: navy,
+                      fontSize: 30,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(_details, textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      const Expanded(child: Text('Model score')),
+                      Text('${(_confidence * 100).round()}%'),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: _confidence,
+                    minHeight: 8,
+                    borderRadius: BorderRadius.circular(8),
+                    color: teal,
+                    backgroundColor: const Color(0xFFE2E8F0),
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Authenticity is not verified by this feature.',
+                    style: TextStyle(
+                      color: Colors.deepOrange,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            if (_message != null) ...[
+              const SizedBox(height: 12),
+              Text(_message!, style: const TextStyle(color: Colors.red)),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 54,
+              child: ElevatedButton.icon(
+                onPressed: _busy || _selectedImageBytes == null
+                    ? null
+                    : _recognizeSelectedImage,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: navy,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                icon: _busy
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.document_scanner),
+                label: Text(_busy ? 'Analyzing...' : 'Recognize Currency'),
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _toggleSpeech,
+              icon: Icon(_speaking ? Icons.stop : Icons.volume_up),
+              label: Text(_speaking ? 'Stop Speech' : 'Speak Result'),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Use a clear, well-lit image with the entire banknote visible. '
+              'The displayed model score is not necessarily a calibrated '
+              'probability and does not confirm that a note is genuine.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.black54),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,7 +1,11 @@
+
 import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+
 import 'camera_service.dart';
 import 'websocket_service.dart';
 
@@ -19,97 +23,169 @@ class DetectionService {
 
   Future<void> start() async {
     if (_isStreaming) return;
+
+    final controller = cameraService.controller;
+
+    if (!controller.value.isInitialized) {
+      throw StateError('Camera is not initialized.');
+    }
+
+    if (controller.value.isStreamingImages) {
+      throw StateError('Camera image stream is already running.');
+    }
+
     _isStreaming = true;
-    debugPrint("Detection Service Started");
+    debugPrint('Detection Service Started');
 
-    cameraService.controller.startImageStream((CameraImage image) {
-      if (!_isStreaming || _isProcessing) return;
+    try {
+      await controller.startImageStream((CameraImage image) {
+        if (!_isStreaming || _isProcessing) return;
 
-      _isProcessing = true;
-      _processImage(image);
-    });
+        _isProcessing = true;
+        _processImage(image);
+      });
+    } catch (_) {
+      _isStreaming = false;
+      rethrow;
+    }
   }
 
-  Future<void> _processImage(CameraImage image) async {
+  Future<void> _processImage(CameraImage cameraImage) async {
     try {
-      // Use compute to perform heavy conversion in a separate isolate
-      final Uint8List? jpegBytes = await compute(_convertYUV420toJPEG, {
-        'planes': image.planes.map((p) => {
-          'bytes': p.bytes,
-          'bytesPerRow': p.bytesPerRow,
-          'bytesPerPixel': p.bytesPerPixel,
-        }).toList(),
-        'width': image.width,
-        'height': image.height,
-      });
-      
+      final planes = cameraImage.planes.map((plane) {
+        return <String, dynamic>{
+          'bytes': plane.bytes,
+          'bytesPerRow': plane.bytesPerRow,
+          'bytesPerPixel': plane.bytesPerPixel ?? 1,
+        };
+      }).toList();
+
+      final jpegBytes = await compute(
+        convertImageToJpeg,
+        <String, dynamic>{
+          'planes': planes,
+          'width': cameraImage.width,
+          'height': cameraImage.height,
+          'format': cameraImage.format.group.name,
+        },
+      );
+
       if (jpegBytes != null && _isStreaming) {
-        debugPrint("Sending frame to backend (${jpegBytes.length} bytes)");
-        final base64Frame = base64Encode(jpegBytes);
-        socketService.send(base64Frame);
+        socketService.send(base64Encode(jpegBytes));
       }
-    } catch (e) {
-      debugPrint("Error processing image: $e");
+    } catch (e, stackTrace) {
+      debugPrint('Error processing camera frame: $e');
+      debugPrintStack(stackTrace: stackTrace);
     } finally {
-      // Throttle: wait a bit before next frame to not overwhelm backend
-      await Future.delayed(const Duration(milliseconds: 100));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
       _isProcessing = false;
     }
   }
 
-  void stop() {
+  Future<void> stop() async {
     _isStreaming = false;
-    if (cameraService.controller.value.isStreamingImages) {
-      cameraService.controller.stopImageStream();
+
+    try {
+      final controller = cameraService.controller;
+
+      if (controller.value.isStreamingImages) {
+        await controller.stopImageStream();
+      }
+    } catch (e) {
+      debugPrint('Error stopping camera stream: $e');
     }
-    debugPrint("Detection Service Stopped");
+
+    debugPrint('Detection Service Stopped');
   }
 }
 
-// Global function for compute
-Uint8List? _convertYUV420toJPEG(Map<String, dynamic> data) {
+// Must remain a top-level function so compute() can run it in an isolate.
+Uint8List? convertImageToJpeg(Map<String, dynamic> data) {
   try {
-    final List<dynamic> planesData = data['planes'];
-    final int width = data['width'];
-    final int height = data['height'];
+    final planes = data['planes'] as List<dynamic>;
+    final width = data['width'] as int;
+    final height = data['height'] as int;
+    final format = data['format'] as String;
 
-    final img.Image imgObj = img.Image(width: width, height: height);
-
-    final Uint8List yBuffer = planesData[0]['bytes'];
-    final Uint8List uBuffer = planesData[1]['bytes'];
-    final Uint8List vBuffer = planesData[2]['bytes'];
-
-    final int yRowStride = planesData[0]['bytesPerRow'];
-    final int uvRowStride = planesData[1]['bytesPerRow'];
-    final int uvPixelStride = planesData[1]['bytesPerPixel'] ?? 1;
-
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        final int yIndex = y * yRowStride + x;
-        final int uvIndex = uvPixelStride * (x ~/ 2) + uvRowStride * (y ~/ 2);
-
-        // Check bounds
-        if (yIndex >= yBuffer.length || uvIndex >= uBuffer.length || uvIndex >= vBuffer.length) {
-          continue;
-        }
-
-        final int yp = yBuffer[yIndex];
-        final int up = uBuffer[uvIndex];
-        final int vp = vBuffer[uvIndex];
-
-        // Faster YUV to RGB conversion
-        int r = (yp + (1.370705 * (vp - 128))).toInt().clamp(0, 255);
-        int g = (yp - (0.337633 * (up - 128)) - (0.698001 * (vp - 128))).toInt().clamp(0, 255);
-        int b = (yp + (1.732446 * (up - 128))).toInt().clamp(0, 255);
-
-        imgObj.setPixelRgb(x, y, r, g, b);
-      }
+    if (planes.isEmpty || width <= 0 || height <= 0) {
+      return null;
     }
 
-    // Lower quality for faster transmission and processing
-    return Uint8List.fromList(img.encodeJpg(imgObj, quality: 40));
-  } catch (e) {
-    debugPrint("Isolate conversion error: $e");
+    final output = img.Image(width: width, height: height);
+
+    if (format == 'yuv420') {
+      if (planes.length < 3) return null;
+
+      final yPlane = planes[0] as Map<String, dynamic>;
+      final uPlane = planes[1] as Map<String, dynamic>;
+      final vPlane = planes[2] as Map<String, dynamic>;
+
+      final yBytes = yPlane['bytes'] as Uint8List;
+      final uBytes = uPlane['bytes'] as Uint8List;
+      final vBytes = vPlane['bytes'] as Uint8List;
+
+      final yRowStride = yPlane['bytesPerRow'] as int;
+      final uRowStride = uPlane['bytesPerRow'] as int;
+      final vRowStride = vPlane['bytesPerRow'] as int;
+
+      final uPixelStride = uPlane['bytesPerPixel'] as int;
+      final vPixelStride = vPlane['bytesPerPixel'] as int;
+
+      for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+          final yIndex = y * yRowStride + x;
+          final uIndex = (y ~/ 2) * uRowStride +
+              (x ~/ 2) * uPixelStride;
+          final vIndex = (y ~/ 2) * vRowStride +
+              (x ~/ 2) * vPixelStride;
+
+          if (yIndex >= yBytes.length ||
+              uIndex >= uBytes.length ||
+              vIndex >= vBytes.length) {
+            continue;
+          }
+
+          final yp = yBytes[yIndex].toDouble();
+          final up = uBytes[uIndex].toDouble() - 128.0;
+          final vp = vBytes[vIndex].toDouble() - 128.0;
+
+          final r = (yp + 1.402 * vp).round().clamp(0, 255);
+          final g = (yp - 0.344136 * up - 0.714136 * vp)
+              .round()
+              .clamp(0, 255);
+          final b = (yp + 1.772 * up).round().clamp(0, 255);
+
+          output.setPixelRgb(x, y, r, g, b);
+        }
+      }
+    } else if (format == 'bgra8888') {
+      final plane = planes[0] as Map<String, dynamic>;
+      final bytes = plane['bytes'] as Uint8List;
+      final rowStride = plane['bytesPerRow'] as int;
+      final pixelStride = plane['bytesPerPixel'] as int;
+
+      for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+          final index = y * rowStride + x * pixelStride;
+
+          if (index + 2 >= bytes.length) continue;
+
+          final b = bytes[index];
+          final g = bytes[index + 1];
+          final r = bytes[index + 2];
+
+          output.setPixelRgb(x, y, r, g, b);
+        }
+      }
+    } else {
+      return null;
+    }
+
+    return Uint8List.fromList(
+      img.encodeJpg(output, quality: 40),
+    );
+  } catch (_) {
+    // Return null if the camera frame cannot be converted.
     return null;
   }
 }

@@ -5,6 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:trulyabled/services/camera_service.dart';
 import 'package:trulyabled/services/detection_service.dart';
 import 'package:trulyabled/services/websocket_service.dart';
+import 'package:flutter/foundation.dart';
 
 class LiveDetectionScreen extends StatefulWidget {
   const LiveDetectionScreen({super.key});
@@ -32,55 +33,114 @@ class _LiveDetectionScreenState extends State<LiveDetectionScreen> {
     _init();
   }
 
-  Future<void> _init() async {
-    try {
-      debugPrint("Initializing Camera...");
-      await _cameraService.initialize();
+ Future<void> _init() async {
+  try {
+    debugPrint('Initializing Camera...');
+    await _cameraService.initialize();
 
-      debugPrint("Connecting to WebSocket...");
-      _socketService.connect("ws://10.0.2.2:8000/ws/detect");
+    if (!mounted) return;
 
-      _detectionService = DetectionService(
-        cameraService: _cameraService,
-        socketService: _socketService,
-      );
+    debugPrint('Connecting to WebSocket...');
 
-      debugPrint("Starting Detection Service...");
-      await _detectionService!.start();
+    final wsUrl = kIsWeb
+        ? 'ws://localhost:8000/ws/detect'
+        : 'ws://10.0.2.2:8000/ws/detect';
 
-      _socketService.stream.listen((message) {
-        debugPrint("Received message from backend: $message");
-        final data = jsonDecode(message);
-        final List objects = data["objects"] ?? [];
+    await _socketService.connect(wsUrl);
 
-        if (objects.isNotEmpty) {
-          final topObject = objects[0];
-          final String name = topObject["name"];
-          final double conf = topObject["confidence"];
+    if (!mounted) return;
+
+    // Listen for backend responses before starting detection.
+    _socketService.stream.listen(
+      (message) {
+        try {
+          debugPrint('Received message from backend: $message');
+
+          final dynamic decoded = jsonDecode(message.toString());
+
+          if (decoded is! Map<String, dynamic>) {
+            debugPrint('Invalid backend response format.');
+            return;
+          }
+
+          final dynamic result = decoded['objects'];
+
+          if (result is! List || result.isEmpty) {
+            if (mounted) {
+              setState(() {
+                _detectedObject = 'No object detected';
+                _confidence = 0.0;
+              });
+            }
+            return;
+          }
+
+          final dynamic topObject = result.first;
+
+          if (topObject is! Map) return;
+
+          final name = topObject['name']?.toString();
+          final confidenceValue = topObject['confidence'];
+
+          if (name == null || name.isEmpty) return;
+
+          final double confidence =
+              (confidenceValue as num?)?.toDouble() ?? 0.0;
 
           if (mounted) {
             setState(() {
               _detectedObject = name.toUpperCase();
-              _confidence = conf;
+              _confidence = confidence;
             });
           }
 
           _speakUpdate(name);
+        } catch (e) {
+          debugPrint('Error parsing detection response: $e');
         }
-      }, onError: (error) {
-        debugPrint("WebSocket Error: $error");
+      },
+      onError: (error) {
+        debugPrint('WebSocket Error: $error');
+      },
+      onDone: () {
+        debugPrint('WebSocket connection closed.');
+      },
+    );
+
+    _detectionService = DetectionService(
+      cameraService: _cameraService,
+      socketService: _socketService,
+    );
+
+    debugPrint('Starting Detection Service...');
+    await _detectionService!.start();
+
+    if (!mounted) return;
+
+    setState(() {
+      _isInitialized = true;
+    });
+
+    debugPrint('Live detection initialized successfully.');
+  } catch (e, stackTrace) {
+    debugPrint('Initialization Error: $e');
+    debugPrintStack(stackTrace: stackTrace);
+
+    if (mounted) {
+      setState(() {
+        _isInitialized = false;
+        _detectedObject = 'Initialization failed';
       });
 
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-        });
-      }
-    } catch (e) {
-      debugPrint("Initialization Error: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not start live detection: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
-
+}
   Future<void> _speakUpdate(String text) async {
     // Only speak if it's a new object or 3 seconds have passed
     final now = DateTime.now();

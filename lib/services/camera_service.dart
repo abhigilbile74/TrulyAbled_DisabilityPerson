@@ -1,31 +1,62 @@
-import 'dart:io';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 
 class CameraService {
   CameraController? _controller;
 
-  CameraController get controller => _controller!;
+  CameraController get controller {
+    final current = _controller;
+    if (current == null) {
+      throw StateError('Camera has not been initialized.');
+    }
+    return current;
+  }
 
   Future<void> initialize() async {
     final cameras = await availableCameras();
 
-    final backCamera = cameras.firstWhere(
-      (c) => c.lensDirection == CameraLensDirection.back,
+    if (cameras.isEmpty) {
+      throw StateError('No cameras are available on this device.');
+    }
+
+    final backCameras = cameras.where(
+      (camera) => camera.lensDirection == CameraLensDirection.back,
     );
 
-    _controller = CameraController(
-      backCamera,
+    final selectedCamera =
+        backCameras.isNotEmpty ? backCameras.first : cameras.first;
+
+    final oldController = _controller;
+    if (oldController != null) {
+      await oldController.dispose();
+    }
+
+    final newController = CameraController(
+      selectedCamera,
       ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup: Platform.isAndroid
-          ? ImageFormatGroup.yuv420
-          : ImageFormatGroup.bgra8888,
+      imageFormatGroup: kIsWeb
+    ? ImageFormatGroup.bgra8888
+    : defaultTargetPlatform == TargetPlatform.iOS
+        ? ImageFormatGroup.bgra8888
+        : ImageFormatGroup.yuv420,
     );
 
-    await _controller!.initialize();
+    _controller = newController;
+
+    try {
+      await newController.initialize();
+    } catch (_) {
+      await newController.dispose();
+      _controller = null;
+      rethrow;
+    }
   }
 
   Future<void> dispose() async {
-    await _controller?.dispose();
+    final current = _controller;
+    _controller = null;
+    await current?.dispose();
   }
 }

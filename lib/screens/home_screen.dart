@@ -47,7 +47,7 @@ class HomeScreen extends StatelessWidget {
         Navigator.pushNamed(context, '/camera');
         break;
       case "Currency":
-        Navigator.pushNamed(context, '/currencyercognitiont');
+        Navigator.pushNamed(context, '/currencyrecognition');
         break;
       case "Text to Speech":
         Navigator.pushNamed(context, '/tts');
