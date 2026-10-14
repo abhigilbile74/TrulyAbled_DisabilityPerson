@@ -6,7 +6,7 @@ import 'package:trulyabled/screens/intialScreen/login_screen.dart';
 import 'package:trulyabled/screens/intialScreen/onborading_screen.dart';
 import 'package:trulyabled/screens/intialScreen/splash_screen.dart';
 import 'package:trulyabled/screens/live_detection_screen.dart';
-import 'package:trulyabled/screens/navigation_screen.dart';
+import 'package:trulyabled/screens/map/navigation_screen.dart';
 import 'package:trulyabled/screens/ocr_reader_screen.dart';
 import 'package:trulyabled/screens/voice_screen.dart';
 
