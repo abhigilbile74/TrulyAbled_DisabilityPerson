@@ -41,6 +41,20 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<script>
+  window.ocrImageDataUrl = async function (dataUrl) {
+    const worker = await Tesseract.createWorker("eng");
+
+    try {
+      const result = await worker.recognize(dataUrl);
+      return result.data.text || "";
+    } finally {
+      await worker.terminate();
+    }
+  };
+</script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

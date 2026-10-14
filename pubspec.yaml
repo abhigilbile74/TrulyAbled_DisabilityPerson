@@ -26,10 +26,10 @@ dependencies:
   camera: ^0.11.0
   image: ^4.1.7
   web_socket_channel: ^2.4.0
-  flutter_tts: ^4.0.2
   vibration: ^1.8.4
-  google_mlkit_text_recognition: ^0.11.0
   image_picker: ^1.1.2
+  flutter_tts: ^4.2.0
+  google_mlkit_text_recognition: ^0.15.0
   
   # navigation 
   google_maps_flutter: ^2.6.1

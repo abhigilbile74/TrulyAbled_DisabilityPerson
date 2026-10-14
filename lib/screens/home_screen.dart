@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:trulyabled/config/app_routes.dart';
 import '../config/app_constant.dart';
 import 'package:trulyabled/widget/bottam_navigationbar_widget.dart';
 
@@ -21,7 +20,6 @@ class HomeScreen extends StatelessWidget {
     {"title": "Speech to Text", "icon": Icons.keyboard_voice},
     {"title": "Medicine Reminder", "icon": Icons.medication},
     {"title": "Emergency Call", "icon": Icons.call},
-    {"title": "Shopping", "icon": Icons.shopping_cart},
   ];
 
   /// Centralized Navigation Router Method
@@ -56,9 +54,6 @@ class HomeScreen extends StatelessWidget {
         break;
       case "Medicine Reminder":
         Navigator.pushNamed(context, '/reminder');
-        break;
-      case "Shopping":
-        Navigator.pushNamed(context, '/shopping');
         break;
       default:
         // Optional Fallback
@@ -146,55 +141,109 @@ class HomeScreen extends StatelessWidget {
             ),
             const SizedBox(height: 25),
 
+            // Quick Actions Section
             const Text(
               "Quick Actions",
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF172B4D),
+                letterSpacing: 0.3,
+              ),
             ),
-            const SizedBox(height: 15),
+            const SizedBox(height: 20),
 
-            /// GridView for Quick Actions
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: quickActions.length,
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
-                mainAxisSpacing: 15,
-                crossAxisSpacing: 15,
-                childAspectRatio: 1.2,
+                mainAxisSpacing: 18,
+                crossAxisSpacing: 18,
+                mainAxisExtent: 175,
               ),
               itemBuilder: (context, index) {
                 final item = quickActions[index];
 
-                return Card(
-                  elevation: 3,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
+                return Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFFFFFFF), Color(0xFFF3F7FF)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: const Color(0xFFE2EAFB),
+                      width: 1,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF004AC6).withOpacity(0.09),
+                        blurRadius: 16,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
                   ),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(18),
-                    onTap: () => _handleNavigation(
-                      context,
-                      item["title"],
-                    ), // Dynamic logic here
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircleAvatar(
-                          radius: 28,
-                          backgroundColor: Colors.blue.shade50,
-                          child: Icon(
-                            item["icon"],
-                            size: 30,
-                            color: const Color(0xff004AC6),
-                          ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(24),
+                      onTap: () => _handleNavigation(context, item["title"]),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 16,
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          item["title"],
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Container(
+                              width: 72,
+                              height: 72,
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFF004AC6),
+                                    Color(0xFF4285F4),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(22),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(
+                                      0xFF004AC6,
+                                    ).withOpacity(0.22),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 5),
+                                  ),
+                                ],
+                              ),
+                              child: Icon(
+                                item["icon"],
+                                size: 36,
+                                color: Colors.white,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            Text(
+                              item["title"].toString(),
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF172B4D),
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 );
