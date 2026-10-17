@@ -1,57 +1,39 @@
-
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class WebSocketService {
   WebSocketChannel? _channel;
+  bool _closed = true;
 
-  bool _isClosed = false;
-
-  Stream<dynamic> get stream {
-    final channel = _channel;
-    if (channel == null) return const Stream<dynamic>.empty();
-    return channel.stream;
-  }
+  Stream<dynamic> get stream =>
+      _channel?.stream ?? const Stream<dynamic>.empty();
 
   Future<void> connect(String url) async {
     await close();
-
-    _isClosed = false;
-
     final channel = WebSocketChannel.connect(Uri.parse(url));
     _channel = channel;
-
+    _closed = false;
     try {
-      await channel.ready;
+      await channel.ready.timeout(const Duration(seconds: 8));
     } catch (_) {
-      _isClosed = true;
+      _closed = true;
+      _channel = null;
       await channel.sink.close();
-      if (identical(_channel, channel)) {
-        _channel = null;
-      }
       rethrow;
     }
   }
 
   void send(String data) {
     final channel = _channel;
-
-    if (channel == null || _isClosed) return;
-
-    try {
-      channel.sink.add(data);
-    } catch (_) {
-      // Ignore sends made after the socket has failed or closed.
-    }
+    if (channel == null || _closed) return;
+    try { channel.sink.add(data); } catch (_) {}
   }
 
   Future<void> close() async {
     final channel = _channel;
-
     _channel = null;
-    _isClosed = true;
-
+    _closed = true;
     if (channel != null) {
-      await channel.sink.close();
+      try { await channel.sink.close(); } catch (_) {}
     }
   }
 }

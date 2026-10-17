@@ -1,225 +1,196 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import 'package:trulyabled/services/camera_service.dart';
-import 'package:trulyabled/services/detection_service.dart';
-import 'package:trulyabled/services/websocket_service.dart';
-import 'package:flutter/foundation.dart';
+import '../services/camera_service.dart';
+import '../services/detection_service.dart';
+import '../services/websocket_service.dart';
 
 class LiveDetectionScreen extends StatefulWidget {
   const LiveDetectionScreen({super.key});
-
   @override
   State<LiveDetectionScreen> createState() => _LiveDetectionScreenState();
 }
 
 class _LiveDetectionScreenState extends State<LiveDetectionScreen> {
-  final CameraService _cameraService = CameraService();
-  final WebSocketService _socketService = WebSocketService();
-  final FlutterTts _flutterTts = FlutterTts();
-  
-  DetectionService? _detectionService;
+  final _camera = CameraService();
+  final _socket = WebSocketService();
+  final _tts = FlutterTts();
+  DetectionService? _detection;
+  StreamSubscription<dynamic>? _subscription;
+  bool _ready = false;
+  bool _starting = false;
+  String _status = 'Starting camera...';
+  List<Map<String, dynamic>> _objects = [];
+  String? _lastSpeech;
+  DateTime? _lastSpeechAt;
 
-  String _detectedObject = "Scanning...";
-  double _confidence = 0.0;
-  bool _isInitialized = false;
-  String? _lastSpoken;
-  DateTime? _lastSpokenTime;
+  String get _url {
+    if (kIsWeb) return 'ws://127.0.0.1:8000/ws/detect';
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      // This is for Android emulator. Use laptop LAN IP on a physical phone.
+      return 'ws://10.0.2.2:8000/ws/detect';
+    }
+    return 'ws://127.0.0.1:8000/ws/detect';
+  }
 
   @override
   void initState() {
     super.initState();
-    _init();
+    _start();
   }
 
- Future<void> _init() async {
-  try {
-    debugPrint('Initializing Camera...');
-    await _cameraService.initialize();
-
-    if (!mounted) return;
-
-    debugPrint('Connecting to WebSocket...');
-
-    final wsUrl = kIsWeb
-        ? 'ws://localhost:8000/ws/detect'
-        : 'ws://10.0.2.2:8000/ws/detect';
-
-    await _socketService.connect(wsUrl);
-
-    if (!mounted) return;
-
-    // Listen for backend responses before starting detection.
-    _socketService.stream.listen(
-      (message) {
-        try {
-          debugPrint('Received message from backend: $message');
-
-          final dynamic decoded = jsonDecode(message.toString());
-
-          if (decoded is! Map<String, dynamic>) {
-            debugPrint('Invalid backend response format.');
-            return;
-          }
-
-          final dynamic result = decoded['objects'];
-
-          if (result is! List || result.isEmpty) {
-            if (mounted) {
-              setState(() {
-                _detectedObject = 'No object detected';
-                _confidence = 0.0;
-              });
-            }
-            return;
-          }
-
-          final dynamic topObject = result.first;
-
-          if (topObject is! Map) return;
-
-          final name = topObject['name']?.toString();
-          final confidenceValue = topObject['confidence'];
-
-          if (name == null || name.isEmpty) return;
-
-          final double confidence =
-              (confidenceValue as num?)?.toDouble() ?? 0.0;
-
-          if (mounted) {
-            setState(() {
-              _detectedObject = name.toUpperCase();
-              _confidence = confidence;
-            });
-          }
-
-          _speakUpdate(name);
-        } catch (e) {
-          debugPrint('Error parsing detection response: $e');
-        }
-      },
-      onError: (error) {
-        debugPrint('WebSocket Error: $error');
-      },
-      onDone: () {
-        debugPrint('WebSocket connection closed.');
-      },
-    );
-
-    _detectionService = DetectionService(
-      cameraService: _cameraService,
-      socketService: _socketService,
-    );
-
-    debugPrint('Starting Detection Service...');
-    await _detectionService!.start();
-
-    if (!mounted) return;
-
-    setState(() {
-      _isInitialized = true;
-    });
-
-    debugPrint('Live detection initialized successfully.');
-  } catch (e, stackTrace) {
-    debugPrint('Initialization Error: $e');
-    debugPrintStack(stackTrace: stackTrace);
-
-    if (mounted) {
-      setState(() {
-        _isInitialized = false;
-        _detectedObject = 'Initialization failed';
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not start live detection: $e'),
-          backgroundColor: Colors.red,
-        ),
+  Future<void> _start() async {
+    if (_starting) return;
+    _starting = true;
+    try {
+      await _camera.initialize();
+      await _tts.setLanguage('en-US');
+      await _tts.setSpeechRate(0.48);
+      await _socket.connect(_url);
+      _subscription = _socket.stream.listen(
+        _onMessage,
+        onError: (e) {
+          if (mounted) setState(() => _status = 'Backend connection error');
+          debugPrint('WebSocket error: $e');
+        },
+        onDone: () {
+          if (mounted) setState(() => _status = 'Backend disconnected');
+        },
       );
+      _detection = DetectionService(cameraService: _camera, socketService: _socket);
+      await _detection!.start();
+      if (mounted) setState(() { _ready = true; _status = 'Detecting objects'; });
+    } catch (e, st) {
+      debugPrint('Detection startup failed: $e\n$st');
+      if (mounted) {
+        setState(() { _ready = false; _status = 'Could not start detection'; });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start detection: $e')),
+        );
+      }
+    } finally {
+      _starting = false;
     }
   }
-}
-  Future<void> _speakUpdate(String text) async {
-    // Only speak if it's a new object or 3 seconds have passed
-    final now = DateTime.now();
-    if (_lastSpoken != text || (_lastSpokenTime == null || now.difference(_lastSpokenTime!).inSeconds > 3)) {
-      _lastSpoken = text;
-      _lastSpokenTime = now;
-      await _flutterTts.speak(text);
+
+  void _onMessage(dynamic message) {
+    try {
+      final data = jsonDecode(message.toString());
+      if (data is! Map) return;
+      if (data['error'] != null) {
+        if (mounted) setState(() => _status = data['error'].toString());
+        return;
+      }
+      final raw = data['objects'];
+      final list = raw is List
+          ? raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          : <Map<String, dynamic>>[];
+      if (!mounted) return;
+      setState(() {
+        _objects = list;
+        _status = list.isEmpty ? 'No object detected' : 'Objects detected';
+      });
+      if (list.isNotEmpty) {
+        final top = list.first;
+        final name = (top['name'] ?? 'object').toString();
+        final distance = (top['distance_label'] ?? 'distance unknown').toString();
+        final text = top['hazard'] == true
+            ? '$name detected $distance. Pause and check your surroundings.'
+            : '$name detected $distance.';
+        _speakThrottled(text);
+      }
+    } catch (e) {
+      debugPrint('Could not parse backend response: $e');
     }
+  }
+
+  Future<void> _speakThrottled(String text) async {
+    final now = DateTime.now();
+    final elapsed = _lastSpeechAt == null ? 999 : now.difference(_lastSpeechAt!).inSeconds;
+    if (_lastSpeech == text && elapsed < 5) return;
+    _lastSpeech = text;
+    _lastSpeechAt = now;
+    try { await _tts.stop(); await _tts.speak(text); }
+    catch (e) { debugPrint('Speech error: $e'); }
+  }
+
+  Future<void> _speakObjects() async {
+    if (_objects.isEmpty) {
+      _lastSpeech = null;
+      await _speakThrottled('No objects detected yet. Move the camera slowly.');
+      return;
+    }
+    _lastSpeech = null;
+    final text = _objects.take(3).map((o) =>
+      '${o['name'] ?? 'object'}, ${o['distance_label'] ?? 'distance unknown'}'
+    ).join('. ');
+    await _speakThrottled(text);
   }
 
   @override
   void dispose() {
-    _detectionService?.stop();
-    _socketService.close();
-    _cameraService.dispose();
-    _flutterTts.stop();
+    _subscription?.cancel();
+    _detection?.stop();
+    _socket.close();
+    _camera.dispose();
+    _tts.stop();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_isInitialized || !_cameraService.controller.value.isInitialized) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        ),
-      );
-    }
-
+    final cameraReady = _camera.isInitialized;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Live Object Detection"),
-        backgroundColor: Colors.deepPurple,
-        foregroundColor: Colors.white,
-      ),
-      body: Stack(
-        children: [
-          // Camera Preview
-          Positioned.fill(
-            child: CameraPreview(_cameraService.controller),
-          ),
-
-          // Detection Overlay
-          Positioned(
-            bottom: 30,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(color: Colors.deepPurple, width: 2),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _detectedObject,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Confidence: ${(_confidence * 100).toStringAsFixed(1)}%",
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        title: const Text('Live Object Detection'),
+        actions: [
+          IconButton(onPressed: _speakObjects, tooltip: 'Speak objects',
+            icon: const Icon(Icons.volume_up)),
         ],
+      ),
+      body: !_ready || !cameraReady
+        ? Center(child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(_status, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              FilledButton(onPressed: _start, child: const Text('Retry')),
+            ]),
+          ))
+        : Stack(children: [
+            Positioned.fill(child: CameraPreview(_camera.controller)),
+            Positioned(top: 12, left: 12, right: 12, child: Card(
+              color: Colors.black87,
+              child: Padding(padding: const EdgeInsets.all(12),
+                child: Text(_status, style: const TextStyle(color: Colors.white, fontSize: 17))),
+            )),
+            Positioned(bottom: 12, left: 12, right: 12, child: Card(
+              color: Colors.black87,
+              child: Padding(padding: const EdgeInsets.all(12),
+                child: _objects.isEmpty
+                  ? const Text('Waiting for detection results…',
+                      style: TextStyle(color: Colors.white))
+                  : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _objects.take(5).map((o) {
+                        final confidence = (o['confidence'] as num?)?.toDouble() ?? 0;
+                        return Padding(padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Text(
+                            '${o['name'] ?? 'Object'} • ${(confidence * 100).toStringAsFixed(0)}% • ${o['distance_label'] ?? 'unknown distance'}',
+                            style: const TextStyle(color: Colors.white, fontSize: 16),
+                          ));
+                      }).toList()),
+              ),
+            )),
+          ]),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _speakObjects,
+        icon: const Icon(Icons.record_voice_over),
+        label: const Text('Speak objects'),
       ),
     );
   }

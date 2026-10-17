@@ -28,7 +28,7 @@ class HomeScreen extends StatelessWidget {
       // Quick Actions Mapping
       case "Scan Text":
       case "OCR Reader":
-        Navigator.pushNamed(context, '/ocrreader');
+        Navigator.pushNamed(context, '/ocr_reader');
         break;
       case "Voice":
       case "Speech to Text":
