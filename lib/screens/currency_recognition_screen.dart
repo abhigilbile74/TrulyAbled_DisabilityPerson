@@ -16,30 +16,28 @@ class CurrencyRecognitionScreen extends StatefulWidget {
       _CurrencyRecognitionScreenState();
 }
 
-class _CurrencyRecognitionScreenState
-    extends State<CurrencyRecognitionScreen> {
+class _CurrencyRecognitionScreenState extends State<CurrencyRecognitionScreen> {
   final ImagePicker _picker = ImagePicker();
-  final CurrencyModelService _model = CurrencyModelService();
+  final CurrencyModelService _api = CurrencyModelService();
   final FlutterTts _tts = FlutterTts();
 
-  CameraController? _cameraController;
-  Uint8List? _selectedImageBytes;
+  CameraController? _camera;
+  Uint8List? _imageBytes;
+  CurrencyPrediction? _prediction;
 
   bool _cameraReady = false;
-  bool _modelReady = false;
+  bool _backendReady = false;
+  bool _checkingBackend = true;
   bool _busy = false;
   bool _speaking = false;
-
-  String _result = 'No currency detected';
-  String _details = 'Choose a photo or capture a banknote to begin.';
-  String? _message;
-  double _confidence = 0;
+  String? _error;
+  String _status = 'Checking currency backend…';
 
   @override
   void initState() {
     super.initState();
     _setupTts();
-    _initializeModel();
+    _checkBackend();
     _initializeCamera();
   }
 
@@ -47,185 +45,175 @@ class _CurrencyRecognitionScreenState
     try {
       await _tts.setLanguage('en-IN');
       await _tts.setSpeechRate(0.45);
+      await _tts.setVolume(1.0);
       _tts.setCompletionHandler(() {
         if (mounted) setState(() => _speaking = false);
+      });
+      _tts.setErrorHandler((message) {
+        if (mounted) setState(() => _speaking = false);
+        debugPrint('TTS error: $message');
       });
     } catch (e) {
       debugPrint('TTS setup failed: $e');
     }
   }
 
-  Future<void> _initializeModel() async {
+  Future<void> _checkBackend() async {
+    if (mounted) {
+      setState(() {
+        _checkingBackend = true;
+        _error = null;
+        _status = 'Connecting to backend…';
+      });
+    }
     try {
-      await _model.loadModel();
+      await _api.loadModel();
       if (!mounted) return;
       setState(() {
-        _modelReady = true;
-        _message = null;
+        _backendReady = true;
+        _checkingBackend = false;
+        _status = 'Backend connected';
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _modelReady = false;
-        _message = _model.unsupportedMessage;
+        _backendReady = false;
+        _checkingBackend = false;
+        _status = 'Backend not connected';
+        _error = '${_api.unsupportedMessage}\nDetails: $e';
       });
     }
   }
 
   Future<void> _initializeCamera() async {
+    CameraController? candidate;
     try {
       final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        if (mounted) {
-          setState(() => _message = 'No camera found. Choose an image instead.');
-        }
-        return;
-      }
+      if (cameras.isEmpty) throw StateError('No camera detected.');
+      final selected = !kIsWeb
+          ? cameras.where((c) => c.lensDirection == CameraLensDirection.back)
+              .firstOrNull ?? cameras.first
+          : cameras.first;
 
-      final camera = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
-      );
-
-      final controller = CameraController(
-        camera,
+      candidate = CameraController(
+        selected,
         ResolutionPreset.medium,
         enableAudio: false,
       );
-      await controller.initialize();
-
+      await candidate.initialize();
       if (!mounted) {
-        await controller.dispose();
+        await candidate.dispose();
         return;
       }
       setState(() {
-        _cameraController = controller;
+        _camera = candidate;
         _cameraReady = true;
       });
     } catch (e) {
+      await candidate?.dispose();
       debugPrint('Camera unavailable: $e');
       if (mounted) {
         setState(() {
           _cameraReady = false;
-          _message = 'Camera unavailable. You can still select a photo from '
-              'your gallery or computer.';
+          // Gallery selection remains available when camera permissions fail.
         });
       }
     }
   }
 
-  Future<void> _chooseGalleryImage() async {
+  Future<void> _chooseImage() async {
     try {
-      final XFile? file = await _picker.pickImage(
+      final file = await _picker.pickImage(
         source: ImageSource.gallery,
         imageQuality: 95,
       );
       if (file == null) return;
-
       final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) throw StateError('The selected image is empty.');
       if (!mounted) return;
-
       setState(() {
-        _selectedImageBytes = bytes;
-        _result = 'Image selected';
-        _details = 'Tap “Recognize Currency” to analyze this image.';
-        _confidence = 0;
-        _message = _modelReady
-            ? null
-            : 'Image selected successfully. Prediction is not available '
-                'until a compatible model or API is configured.';
+        _imageBytes = bytes;
+        _prediction = null;
+        _error = null;
+        _status = 'Image ready to analyze';
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _message = 'Could not open the image: $e');
+      setState(() => _error = 'Could not select image: $e');
     }
   }
 
   Future<void> _capturePhoto() async {
-    final controller = _cameraController;
-    if (controller == null ||
-        !controller.value.isInitialized ||
-        !_cameraReady) {
-      setState(() {
-        _message = 'Camera unavailable. Use “Choose from Gallery” instead.';
-      });
+    final camera = _camera;
+    if (camera == null || !camera.value.isInitialized || !_cameraReady) {
+      _showMessage('Camera is unavailable. Choose a photo instead.');
       return;
     }
-
     try {
-      final XFile photo = await controller.takePicture();
-      final bytes = await photo.readAsBytes();
+      final file = await camera.takePicture();
+      final bytes = await file.readAsBytes();
       if (!mounted) return;
       setState(() {
-        _selectedImageBytes = bytes;
-        _result = 'Image captured';
-        _details = 'Tap “Recognize Currency” to analyze this image.';
-        _confidence = 0;
-        _message = _modelReady
-            ? null
-            : 'Photo captured, but prediction needs a compatible model/API.';
+        _imageBytes = bytes;
+        _prediction = null;
+        _error = null;
+        _status = 'Photo ready to analyze';
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _message = 'Could not capture photo. Choose an image from the gallery.';
-      });
+      setState(() => _error = 'Could not capture photo: $e');
     }
   }
 
-  Future<void> _recognizeSelectedImage() async {
-    final bytes = _selectedImageBytes;
+  Future<void> _recognize() async {
+    final bytes = _imageBytes;
     if (bytes == null) {
-      _showMessage('Choose or capture a banknote image first.');
-      return;
-    }
-    if (!_modelReady) {
-      _showMessage(
-        'The image is ready, but recognition is not configured. Add a trained '
-        'model or connect a backend prediction API.',
-      );
+      _showMessage('Choose a banknote image or take a photo first.');
       return;
     }
     if (_busy) return;
 
     setState(() {
       _busy = true;
-      _message = null;
-      _result = 'Analyzing...';
+      _error = null;
+      _prediction = null;
+      _status = 'Analyzing banknote…';
     });
 
     try {
-      final prediction = await _model.predictImage(bytes);
-      final isConfident = prediction.confidence >= 0.70;
-      final label = _formatLabel(prediction.label);
-
+      final prediction = await _api.predictImage(bytes);
       if (!mounted) return;
+      final identified = prediction.confidence > 0;
       setState(() {
-        _result = isConfident ? label : 'Uncertain result';
-        _confidence = prediction.confidence;
-        _details = isConfident
-            ? 'Possible denomination: $label. Authenticity has not been verified.'
-            : 'Try a clearer photo with better lighting.';
+        _prediction = prediction;
+        _status = !identified
+            ? 'Denomination not identified'
+            : 'Analysis complete';
+        _backendReady = true;
       });
-      if (isConfident) {
-        await _speak('$label detected. Authenticity has not been verified.');
+
+      if (identified) {
+        await _speak(
+          'Possible denomination: ${prediction.label}. '
+          'Please verify the note. Authenticity has not been checked.',
+        );
+      } else {
+        await _speak(
+          'I could not confidently identify the denomination. '
+          'Please take a clearer photo with the entire banknote visible.',
+        );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _result = 'Recognition failed';
-        _details = 'Try another clear image.';
-        _message = 'Prediction failed. Confirm that model input processing '
-            'and labels match your trained model.';
+        _status = 'Recognition failed';
+        _backendReady = false;
+        _error = 'Could not analyze this image.\n$e';
       });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  String _formatLabel(String label) {
-    final clean = label.trim().replaceAll('₹', '').replaceAll('Rs.', '').trim();
-    return RegExp(r'^\d+$').hasMatch(clean) ? '₹$clean' : label;
   }
 
   Future<void> _speak(String text) async {
@@ -235,6 +223,7 @@ class _CurrencyRecognitionScreenState
       await _tts.speak(text);
     } catch (e) {
       if (mounted) setState(() => _speaking = false);
+      debugPrint('Speech failed: $e');
     }
   }
 
@@ -242,30 +231,38 @@ class _CurrencyRecognitionScreenState
     if (_speaking) {
       await _tts.stop();
       if (mounted) setState(() => _speaking = false);
-    } else {
-      await _speak('$_result. $_details. Authenticity has not been verified.');
+      return;
     }
-  }
-
-  void _showMessage(String text) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(text)));
+    final result = _prediction;
+    if (result == null) {
+      _showMessage('Recognize a banknote first.');
+      return;
+    }
+    await _speak(
+      '${result.label}. ${result.details} '
+      'Authenticity has not been verified.',
+    );
   }
 
   void _clearImage() {
     setState(() {
-      _selectedImageBytes = null;
-      _result = 'No currency detected';
-      _details = 'Choose a photo or capture a banknote to begin.';
-      _confidence = 0;
+      _imageBytes = null;
+      _prediction = null;
+      _error = null;
+      _status = _backendReady ? 'Ready for a banknote image' : 'Backend not connected';
     });
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
   void dispose() {
-    _cameraController?.dispose();
-    _model.close();
+    _camera?.dispose();
+    _api.close();
     _tts.stop();
     super.dispose();
   }
@@ -274,56 +271,62 @@ class _CurrencyRecognitionScreenState
   Widget build(BuildContext context) {
     const navy = Color(0xFF20246B);
     const teal = Color(0xFF087F8C);
+    final prediction = _prediction;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F8FF),
+      backgroundColor: const Color(0xFFF5F7FC),
       appBar: AppBar(
-        title: const Text(
-          'Currency Recognition',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Currency Recognition',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        backgroundColor: const Color(0xFFF5F7FC),
         foregroundColor: navy,
-        backgroundColor: const Color(0xFFF6F8FF),
         elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Check backend connection',
+            onPressed: _checkingBackend ? null : _checkBackend,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
       ),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
+            _ConnectionBanner(
+              connected: _backendReady,
+              checking: _checkingBackend,
+              status: _status,
+              onRetry: _checkBackend,
+            ),
+            const SizedBox(height: 14),
             Container(
-              height: 280,
+              height: 250,
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 color: const Color(0xFF171A35),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: _selectedImageBytes != null
-                  ? Image.memory(
-                      _selectedImageBytes!,
-                      fit: BoxFit.contain,
-                      width: double.infinity,
-                    )
-                  : _cameraReady &&
-                          _cameraController != null &&
-                          _cameraController!.value.isInitialized
-                      ? CameraPreview(_cameraController!)
+              child: _imageBytes != null
+                  ? Image.memory(_imageBytes!, fit: BoxFit.contain, width: double.infinity)
+                  : (_cameraReady && _camera != null && _camera!.value.isInitialized)
+                      ? CameraPreview(_camera!)
                       : const Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.image_search,
-                                  color: Colors.white, size: 54),
-                              SizedBox(height: 12),
-                              Text(
-                                'Choose a banknote photo',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                              SizedBox(height: 6),
-                              Text(
-                                'Camera optional',
-                                style: TextStyle(color: Colors.white70),
-                              ),
-                            ],
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.account_balance_wallet_outlined,
+                                    color: Colors.white, size: 54),
+                                SizedBox(height: 12),
+                                Text('Choose a banknote photo',
+                                    style: TextStyle(color: Colors.white, fontSize: 17)),
+                                SizedBox(height: 5),
+                                Text('Camera is optional',
+                                    style: TextStyle(color: Colors.white70)),
+                              ],
+                            ),
                           ),
                         ),
             ),
@@ -333,16 +336,16 @@ class _CurrencyRecognitionScreenState
               runSpacing: 10,
               children: [
                 OutlinedButton.icon(
-                  onPressed: _busy ? null : _chooseGalleryImage,
+                  onPressed: _busy ? null : _chooseImage,
                   icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('Choose from Gallery'),
+                  label: const Text('Choose Image'),
                 ),
                 OutlinedButton.icon(
                   onPressed: _busy || !_cameraReady ? null : _capturePhoto,
                   icon: const Icon(Icons.camera_alt_outlined),
                   label: const Text('Take Photo'),
                 ),
-                if (_selectedImageBytes != null)
+                if (_imageBytes != null)
                   TextButton.icon(
                     onPressed: _busy ? null : _clearImage,
                     icon: const Icon(Icons.delete_outline),
@@ -350,52 +353,62 @@ class _CurrencyRecognitionScreenState
                   ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(20),
                 boxShadow: [
                   BoxShadow(
                     color: navy.withOpacity(0.06),
-                    blurRadius: 16,
-                    offset: const Offset(0, 5),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6),
                   ),
                 ],
               ),
               child: Column(
                 children: [
-                  const Text(
-                    'DETECTED DENOMINATION',
-                    style: TextStyle(
-                      color: teal,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
+                  const Text('DETECTED DENOMINATION',
+                      style: TextStyle(
+                        color: teal,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      )),
+                  const SizedBox(height: 12),
+                  if (_busy)
+                    const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: CircularProgressIndicator(),
+                    )
+                  else
+                    Text(
+                      prediction?.label ?? 'Ready to scan',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: navy,
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 10),
                   Text(
-                    _result,
+                    prediction?.details ??
+                        (_imageBytes == null
+                            ? 'Choose or capture a clear Indian banknote image.'
+                            : 'Image selected. Tap Recognize Currency to analyze it.'),
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: navy,
-                      fontSize: 30,
-                      fontWeight: FontWeight.bold,
-                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(_details, textAlign: TextAlign.center),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 18),
                   Row(
                     children: [
-                      const Expanded(child: Text('Model score')),
-                      Text('${(_confidence * 100).round()}%'),
+                      const Expanded(child: Text('OCR score (not verified probability)')),
+                      Text('${((prediction?.confidence ?? 0) * 100).round()}%'),
                     ],
                   ),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(
-                    value: _confidence,
+                    value: prediction?.confidence ?? 0,
                     minHeight: 8,
                     borderRadius: BorderRadius.circular(8),
                     color: teal,
@@ -403,63 +416,121 @@ class _CurrencyRecognitionScreenState
                   ),
                   const SizedBox(height: 14),
                   const Text(
-                    'Authenticity is not verified by this feature.',
-                    style: TextStyle(
-                      color: Colors.deepOrange,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    'This feature estimates denomination from printed text. '
+                    'It does not verify whether a banknote is genuine.',
                     textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.deepOrange, fontSize: 12,
+                        fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
             ),
-            if (_message != null) ...[
+            if (_error != null) ...[
               const SizedBox(height: 12),
-              Text(_message!, style: const TextStyle(color: Colors.red)),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Text(_error!, style: TextStyle(color: Colors.red.shade800)),
+              ),
             ],
             const SizedBox(height: 16),
             SizedBox(
               height: 54,
               child: ElevatedButton.icon(
-                onPressed: _busy || _selectedImageBytes == null
-                    ? null
-                    : _recognizeSelectedImage,
+                onPressed: _busy || _imageBytes == null ? null : _recognize,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: navy,
                   foregroundColor: Colors.white,
+                  disabledBackgroundColor: navy.withOpacity(0.35),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                      borderRadius: BorderRadius.circular(14)),
                 ),
                 icon: _busy
                     ? const SizedBox(
                         width: 20,
                         height: 20,
                         child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
+                            strokeWidth: 2, color: Colors.white),
                       )
-                    : const Icon(Icons.document_scanner),
-                label: Text(_busy ? 'Analyzing...' : 'Recognize Currency'),
+                    : const Icon(Icons.document_scanner_outlined),
+                label: Text(_busy ? 'Analyzing…' : 'Recognize Currency'),
               ),
             ),
             const SizedBox(height: 10),
             OutlinedButton.icon(
-              onPressed: _toggleSpeech,
-              icon: Icon(_speaking ? Icons.stop : Icons.volume_up),
+              onPressed: _busy ? null : _toggleSpeech,
+              icon: Icon(_speaking ? Icons.stop : Icons.volume_up_outlined),
               label: Text(_speaking ? 'Stop Speech' : 'Speak Result'),
             ),
             const SizedBox(height: 12),
             const Text(
-              'Use a clear, well-lit image with the entire banknote visible. '
-              'The displayed model score is not necessarily a calibrated '
-              'probability and does not confirm that a note is genuine.',
+              'For best results, place the full note in the frame, keep it sharp, '
+              'avoid glare, and use good lighting. If the result is uncertain, '
+              'do not rely on it for a financial decision.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: Colors.black54),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ConnectionBanner extends StatelessWidget {
+  const _ConnectionBanner({
+    required this.connected,
+    required this.checking,
+    required this.status,
+    required this.onRetry,
+  });
+
+  final bool connected;
+  final bool checking;
+  final String status;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = checking
+        ? Colors.blueGrey
+        : connected
+            ? Colors.green.shade700
+            : Colors.red.shade700;
+    final background = checking
+        ? Colors.blueGrey.shade50
+        : connected
+            ? Colors.green.shade50
+            : Colors.red.shade50;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          if (checking)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Icon(connected ? Icons.cloud_done_outlined : Icons.cloud_off_outlined,
+                color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(status,
+                style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+          ),
+          if (!connected && !checking)
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
       ),
     );
   }
