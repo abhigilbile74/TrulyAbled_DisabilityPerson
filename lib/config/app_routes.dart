@@ -5,6 +5,7 @@ import 'package:trulyabled/screens/home_screen.dart';
 import 'package:trulyabled/screens/intialScreen/login_screen.dart';
 import 'package:trulyabled/screens/intialScreen/onborading_screen.dart';
 import 'package:trulyabled/screens/intialScreen/splash_screen.dart';
+import 'package:trulyabled/screens/medicine_reminder_screen.dart';
 import 'package:trulyabled/screens/live_detection_screen.dart';
 import 'package:trulyabled/screens/map/navigation_screen.dart';
 import 'package:trulyabled/screens/ocr_reader_screen.dart';
@@ -22,7 +23,8 @@ class AppRoutes {
   static const history = '/history';
   static const profile = '/profile';
   static const sos = '/sos';
-  static const ocrReader = '/ocrreader';
+  static const ocrReader = '/ocr_reader';
+  static const medicalReminderScreen = '/medicalReminderScreen';
   static const currencyercognition = '/currencyrecognition';
   static const stt = '/stt';
   static const navigation_map = '/navigation_map';
@@ -38,6 +40,7 @@ class AppRoutes {
     sos: (_) => EmergencySosScreen(),
     ocrReader: (_) => OCRReaderScreen(),
     currencyercognition: (_) => CurrencyRecognitionScreen(),
+    medicalReminderScreen: (_) => MedicineReminderScreen(),
     stt: (_) => SpeechToTextScreen(),
     navigation_map: (_)=> NavigationScreen(),
   };

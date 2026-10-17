@@ -167,7 +167,7 @@ class _EmergencySosScreenState extends State<EmergencySosScreen>
     try {
       if (!kIsWeb) {
         try {
-          final hasVibrator = await Vibration.hasVibrator() ?? false;
+          final hasVibrator = await Vibration.hasVibrator();
           if (hasVibrator) {
             await Vibration.vibrate(
               pattern: [0, 500, 250, 500, 250, 800],

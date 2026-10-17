@@ -1,28 +1,25 @@
 import 'dart:typed_data';
 
 class CurrencyModelService {
+  String? unsupportedMessage;
+
   bool get isSupported => false;
   bool get isModelLoaded => false;
-  String get unsupportedMessage =>
-      'Currency prediction is not configured for this platform.';
+  List<String> get labels => const [];
 
   Future<void> loadModel() async {
-    throw UnsupportedError(unsupportedMessage);
+    throw UnsupportedError(
+      'Currency recognition is not implemented for this platform.',
+    );
   }
 
-  Future<CurrencyPrediction> predictImage(Uint8List imageBytes) async {
-    throw UnsupportedError(unsupportedMessage);
+  List<double> predict(List<List<List<List<double>>>> input) {
+    throw UnsupportedError(
+      'Currency recognition is not implemented for this platform.',
+    );
   }
 
   void close() {}
-}
 
-class CurrencyPrediction {
-  const CurrencyPrediction({
-    required this.label,
-    required this.confidence,
-  });
-
-  final String label;
-  final double confidence;
+  Future<Object?> predictImage(Uint8List bytes) async {}
 }

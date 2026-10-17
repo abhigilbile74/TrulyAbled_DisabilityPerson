@@ -53,7 +53,7 @@ class HomeScreen extends StatelessWidget {
         Navigator.pushNamed(context, '/tts');
         break;
       case "Medicine Reminder":
-        Navigator.pushNamed(context, '/reminder');
+        Navigator.pushNamed(context, '/medicalReminderScreen');
         break;
       default:
         // Optional Fallback

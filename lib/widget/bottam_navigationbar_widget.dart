@@ -37,13 +37,6 @@ class BottamNavigationbarWidget extends StatelessWidget {
       case 3:
         Navigator.pushReplacementNamed(
           context,
-          AppRoutes.history,
-        );
-        break;
-
-      case 4:
-        Navigator.pushReplacementNamed(
-          context,
           AppRoutes.profile,
         );
         break;
@@ -123,10 +116,7 @@ class BottamNavigationbarWidget extends StatelessWidget {
                 icon: Icon(Icons.emergency_share_outlined),
                 label: 'SOS',
               ),
-              NavigationDestination(
-                icon: Icon(Icons.history),
-                label: 'History',
-              ),
+              
               NavigationDestination(
                 icon: Icon(Icons.person_outline),
                 label: 'Profile',
